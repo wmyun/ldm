@@ -9,7 +9,7 @@ model:
     timesteps: 1000
     first_stage_key: jpg
     cond_stage_key: nix
-    image_size: 48
+    image_size: 64
     channels: 16
     cond_stage_trainable: false
     conditioning_key: crossattn

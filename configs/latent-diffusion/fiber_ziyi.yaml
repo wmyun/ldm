@@ -1,0 +1,98 @@
+model:
+  base_learning_rate: 5.0e-5   # set to target_lr by starting main.py with '--scale_lr False'
+  target: ldm.models.diffusion.GAN_ddpm.LatentDiffusion
+  params:
+    linear_start: 0.0015
+    linear_end: 0.0155
+    num_timesteps_cond: 1
+    log_every_t: 200
+    timesteps: 1000
+    loss_type: l2
+    first_stage_key: "image"
+    cond_stage_key: "masked_image"
+    image_size: 256
+    channels: 2
+    concat_mode: True # False
+    scale_by_std: false # False will set to 1
+
+    cond_stage_trainable: false # True
+    conditioning_key: concat
+    monitor: val/loss_simple_ema
+    use_ema: False
+
+    scheduler_config: # 10000 warmup steps
+      target: ldm.lr_scheduler.LambdaLinearScheduler
+      params:
+        warm_up_steps: [10000]
+        cycle_lengths: [10000000000000]
+        f_start: [1.e-6]
+        f_max: [1.]
+        f_min: [ 1.]
+
+    unet_config:
+      target: ldm.modules.diffusionmodules.openaimodel.UNetModel
+      params:
+        image_size: 256
+        in_channels: 1025 # image, cond image, mask
+        out_channels: 1
+        model_channels: 32
+        attention_resolutions: [ 1, 2, 4 ]   # 32, 16, 8, 4
+        num_res_blocks: 2
+        channel_mult: [ 1,2,2,4 ]  # 32, 16, 8, 4, 2
+        num_heads: 8
+        use_scale_shift_norm: True
+        resblock_updown: True
+
+    first_stage_config:
+      target: ldm.models.GAN_autoencoder.AutoencoderKL
+      params:
+        embed_dim: 3
+        monitor: "val/rec_loss"
+        ckpt_path: "logs/2023-08-01T13-53-10_autoencoder_leather_kl_64x64x3/checkpoints/last.ckpt"
+        ddconfig: # useless
+          double_z: True
+          z_channels: 3
+          resolution: 384
+          in_channels: 3
+          out_ch: 3
+          ch: 64
+          ch_mult: [ 1,2,4 ]  # num_down = len(ch_mult)-1
+          num_res_blocks: 2
+          attn_resolutions: [ ]
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+    cond_stage_config: __is_first_stage__ # need this to specify cond key
+#      target: ldm.modules.encoders.modules.SpatialRescaler
+
+data:
+  target: main.DataModuleFromConfig
+  params:
+    batch_size: 20
+    num_workers: 5
+    wrap: False
+    train:
+      target: ldm.data.leather.LeatherGlue
+      params:
+        data_root: /media/ziyi/Dataset/OAI_pain/full/bp/*
+        mode: train
+    validation:
+      target: ldm.data.leather.LeatherGlue
+      params:
+        data_root: /media/ziyi/Dataset/OAI_pain/full/ap/*
+        mode: eval
+
+lightning:
+  callbacks:
+    image_logger:
+      target: main.ImageLogger
+      params:
+        batch_frequency: 1000
+        max_images: 4
+        increase_log_steps: False
+
+
+  trainer:
+    max_epochs: 40000
+    benchmark: True

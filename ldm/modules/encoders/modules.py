@@ -1,12 +1,11 @@
 import torch
 import torch.nn as nn
 from functools import partial
-import clip
+#import clip
 from einops import rearrange, repeat
-import kornia
-
-
-from ldm.modules.x_transformer import Encoder, TransformerWrapper  # TODO: can we directly rely on lucidrains code and simply add this as a reuirement? --> test
+#import kornia
+import math
+from ldm.modules.x_transformer import Encoder, TransformerWrapper, ViTransformerWrapper # TODO: can we directly rely on lucidrains code and simply add this as a reuirement? --> test
 
 
 class AbstractEncoder(nn.Module):
@@ -35,15 +34,25 @@ class ClassEmbedder(nn.Module):
 
 class TransformerEmbedder(AbstractEncoder):
     """Some transformer encoder layers"""
-    def __init__(self, n_embed, n_layer, vocab_size, max_seq_len=77, device="cuda"):
+    def __init__(self, n_embed, n_layer, vocab_size=8129, max_seq_len=77, device="cuda", 
+                embed_dim=4, method='bilinear', n_stages=1, image_size=256, patch_size=32):
         super().__init__()
         self.device = device
-        self.transformer = TransformerWrapper(num_tokens=vocab_size, max_seq_len=max_seq_len,
-                                              attn_layers=Encoder(dim=n_embed, depth=n_layer))
+        assert method in ['nearest','linear','bilinear','trilinear','bicubic','area']
+        # self.transformer = TransformerWrapper(num_tokens=vocab_size, max_seq_len=max_seq_len,
+        #                                       attn_layers=Encoder(dim=n_embed, depth=n_layer))
+        self.interpolator = partial(torch.nn.functional.interpolate, mode=method)
+        self.transformer = ViTransformerWrapper(image_size=image_size, patch_size=patch_size, channels=1,
+                                                attn_layers=Encoder(dim=n_embed, depth=n_layer))
 
-    def forward(self, tokens):
-        tokens = tokens.to(self.device)  # meh
-        z = self.transformer(tokens, return_embeddings=True)
+    def forward(self, x):
+        #tokens = tokens.to(self.device)  # meh
+        n_stages = int(math.log((x.shape[2] // 256),2))
+        if n_stages > 0:
+            for stage in range(n_stages):
+                x = self.interpolator(x, scale_factor=0.5)
+
+        z = self.transformer(x, return_embeddings=True)
         return z
 
     def encode(self, x):
@@ -80,7 +89,7 @@ class BERTTokenizer(AbstractEncoder):
 class BERTEmbedder(AbstractEncoder):
     """Uses the BERT tokenizr model and add some transformer encoder layers"""
     def __init__(self, n_embed, n_layer, vocab_size=30522, max_seq_len=77,
-                 device="cuda",use_tokenizer=True, embedding_dropout=0.0):
+                 device="cuda",use_tokenizer=True, embedding_dropout=0.0, embed_dim=4):
         super().__init__()
         self.use_tknz_fn = use_tokenizer
         if self.use_tknz_fn:
@@ -135,68 +144,68 @@ class SpatialRescaler(nn.Module):
         return self(x)
 
 
-class FrozenCLIPTextEmbedder(nn.Module):
-    """
-    Uses the CLIP transformer encoder for text.
-    """
-    def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True):
-        super().__init__()
-        self.model, _ = clip.load(version, jit=False, device="cpu")
-        self.device = device
-        self.max_length = max_length
-        self.n_repeat = n_repeat
-        self.normalize = normalize
+# class FrozenCLIPTextEmbedder(nn.Module):
+#     """
+#     Uses the CLIP transformer encoder for text.
+#     """
+#     def __init__(self, version='ViT-L/14', device="cuda", max_length=77, n_repeat=1, normalize=True):
+#         super().__init__()
+#         self.model, _ = clip.load(version, jit=False, device="cpu")
+#         self.device = device
+#         self.max_length = max_length
+#         self.n_repeat = n_repeat
+#         self.normalize = normalize
 
-    def freeze(self):
-        self.model = self.model.eval()
-        for param in self.parameters():
-            param.requires_grad = False
+#     def freeze(self):
+#         self.model = self.model.eval()
+#         for param in self.parameters():
+#             param.requires_grad = False
 
-    def forward(self, text):
-        tokens = clip.tokenize(text).to(self.device)
-        z = self.model.encode_text(tokens)
-        if self.normalize:
-            z = z / torch.linalg.norm(z, dim=1, keepdim=True)
-        return z
+#     def forward(self, text):
+#         tokens = clip.tokenize(text).to(self.device)
+#         z = self.model.encode_text(tokens)
+#         if self.normalize:
+#             z = z / torch.linalg.norm(z, dim=1, keepdim=True)
+#         return z
 
-    def encode(self, text):
-        z = self(text)
-        if z.ndim==2:
-            z = z[:, None, :]
-        z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
-        return z
+#     def encode(self, text):
+#         z = self(text)
+#         if z.ndim==2:
+#             z = z[:, None, :]
+#         z = repeat(z, 'b 1 d -> b k d', k=self.n_repeat)
+#         return z
 
 
-class FrozenClipImageEmbedder(nn.Module):
-    """
-        Uses the CLIP image encoder.
-        """
-    def __init__(
-            self,
-            model,
-            jit=False,
-            device='cuda' if torch.cuda.is_available() else 'cpu',
-            antialias=False,
-        ):
-        super().__init__()
-        self.model, _ = clip.load(name=model, device=device, jit=jit)
+# class FrozenClipImageEmbedder(nn.Module):
+#     """
+#         Uses the CLIP image encoder.
+#         """
+#     def __init__(
+#             self,
+#             model,
+#             jit=False,
+#             device='cuda' if torch.cuda.is_available() else 'cpu',
+#             antialias=False,
+#         ):
+#         super().__init__()
+#         self.model, _ = clip.load(name=model, device=device, jit=jit)
 
-        self.antialias = antialias
+#         self.antialias = antialias
 
-        self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
-        self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
+#         self.register_buffer('mean', torch.Tensor([0.48145466, 0.4578275, 0.40821073]), persistent=False)
+#         self.register_buffer('std', torch.Tensor([0.26862954, 0.26130258, 0.27577711]), persistent=False)
 
-    def preprocess(self, x):
-        # normalize to [0,1]
-        x = kornia.geometry.resize(x, (224, 224),
-                                   interpolation='bicubic',align_corners=True,
-                                   antialias=self.antialias)
-        x = (x + 1.) / 2.
-        # renormalize according to clip
-        x = kornia.enhance.normalize(x, self.mean, self.std)
-        return x
+#     def preprocess(self, x):
+#         # normalize to [0,1]
+#         x = kornia.geometry.resize(x, (224, 224),
+#                                    interpolation='bicubic',align_corners=True,
+#                                    antialias=self.antialias)
+#         x = (x + 1.) / 2.
+#         # renormalize according to clip
+#         x = kornia.enhance.normalize(x, self.mean, self.std)
+#         return x
 
-    def forward(self, x):
-        # x is assumed to be in range [-1,1]
-        return self.model.encode_image(self.preprocess(x))
+#     def forward(self, x):
+#         # x is assumed to be in range [-1,1]
+#         return self.model.encode_image(self.preprocess(x))
 

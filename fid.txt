@@ -1,0 +1,4 @@
+python -m pytorch_fid --device cuda:3 /home/meng-yun/Projects/rb_vessel/Dataset/vessel1_xy/ /home/meng-yun/Projects/rb_vessel/Log/test_yztoxy_231225_3200_i20/results/test/Out/
+python -m pytorch_fid --device cuda:3 /home/meng-yun/Projects/rb_vessel/Dataset/vessel1_xy/ /home/meng-yun/Projects/rb_vessel/Dataset/fid_8x_yz_torchup/
+python -m pytorch_fid --device cuda:1 /home/meng-yun/Projects/latent/results/240408_50s/ /home/meng-yun/Projects/latent/results/240409_50s/
+python -m pytorch_fid --device cuda:3 /home/meng-yun/Projects/rb_vessel/Dataset/vessel1_xy/ /home/meng-yun/Projects/latent/results/240415_50s/

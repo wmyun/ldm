@@ -14,7 +14,7 @@ from PIL import Image
 from pytorch_lightning import seed_everything
 from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, Callback, LearningRateMonitor
-from pytorch_lightning.utilities.distributed import rank_zero_only
+from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.utilities import rank_zero_info
 
 from ldm.data.base import Txt2ImgIterableBaseDataset
@@ -400,7 +400,7 @@ class CUDACallback(Callback):
         torch.cuda.synchronize(trainer.root_gpu)
         self.start_time = time.time()
 
-    def on_train_epoch_end(self, trainer, pl_module, outputs):
+    def on_train_epoch_end(self, trainer, pl_module=None, outputs=None):
         torch.cuda.synchronize(trainer.root_gpu)
         max_memory = torch.cuda.max_memory_allocated(trainer.root_gpu) / 2 ** 20
         epoch_time = time.time() - self.start_time
@@ -739,3 +739,7 @@ if __name__ == "__main__":
             os.rename(logdir, dst)
         if trainer.global_rank == 0:
             print(trainer.profiler.summary())
+
+# CUDA_VISIBLE_DEVICES=2,3 python main.py --base configs/latent-diffusion/pcross_yztoxy.yaml -t --gpus 0,1,
+# CUDA_VISIBLE_DEVICES=2,3 python main.py --base configs/autoencoder/autoencoder_kl_32x32x4_test.yaml -t --gpus 0,1, 
+# CUDA_VISIBLE_DEVICES=2,3 python main.py --base configs/autoencoder/vq_f8_test.yaml -t --gpus 0,1, 
